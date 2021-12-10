@@ -1,6 +1,8 @@
 import numpy as np
 from load_trk import load_streamlines
+from load_trk_no_numba import load_streamlines as load_streamlines_no_numba
 from load_trk_new import load_streamlines as load_streamlines_new
+from load_trk_newer import load_streamlines as load_streamlines_newer
 from load_trk_numba import load_streamlines as load_streamlines_numba
 from time import time
 
@@ -22,10 +24,22 @@ if __name__=='__main__':
     print(f"Total time: {time() - t0} sec.")
 
     print("")
+    print("Using load_trk_newer.py")
+    t0 = time()
+    streamlines, header, lengths, idxs = load_streamlines_newer(filename, idxs=range(n_streamlines), apply_affine=False, container='array', verbose=True)
+    print(f"Total time: {time() - t0} sec. Checksum: {sum(s.sum() for s in streamlines)}")
+
+    print("")
+    print("Using load_trk_no_numba.py")
+    t0 = time()
+    streamlines, header, lengths, idxs = load_streamlines_no_numba(filename, idxs=range(n_streamlines), apply_affine=False, container='array', verbose=True)
+    print(f"Total time: {time() - t0} sec. Checksum: {sum(s.sum() for s in streamlines)}")
+
+    print("")
     print("Using load_trk_numba.py")
     t0 = time()
     streamlines, header, lengths, idxs = load_streamlines_numba(filename, idxs=range(n_streamlines), apply_affine=False, container='array', verbose=True)
-    print(f"Total time: {time() - t0} sec.")
+    print(f"Total time: {time() - t0} sec. Checksum: {sum(s.sum() for s in streamlines)}")
 
     print("")
     filename_npy = filename[:-4] + '_no_resample.npy'
