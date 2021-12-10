@@ -1,37 +1,11 @@
 # Copyright (c) 2019 Pietro Astolfi, Emanuele Olivetti
 # MIT License
 
+import ipdb
 import numpy as np
 import nibabel as nib
-from numba import jit
 import os
 from time import time
-
-
-@jit(nopython=True)
-def parse_lengths(buffer, lengths, point_size, n_properties):
-    pointer = 0
-    for idx in range(lengths.size):
-        l = buffer[pointer]
-        lengths[idx] = l
-        pointer += 1 + l * point_size + n_properties
-    
-    return lengths
-
-
-@jit(nopython=True)
-def parse_streamlines(buffer, idxs, split_points, n_floats, affine, apply_affine=True):
-    streamlines = []
-    rotation_zoom_shear = affine[:3,:3].copy()  # necessary to create a C-contiguous array
-    translation = affine[:3,3:4].copy()  # necessary to create a C-contiguous array
-    for idx in idxs:  # range(n_floats.size):
-        s = buffer[split_points[idx]:split_points[idx] + n_floats[idx]].reshape(-1, 3)
-        if apply_affine:
-            s = (np.dot(rotation_zoom_shear, s.T) + translation).T
-
-        streamlines.append(s)
-    
-    return streamlines
 
 
 def load_streamlines(trk_fn, idxs=None, apply_affine=True, container='list',
@@ -93,9 +67,29 @@ def load_streamlines(trk_fn, idxs=None, apply_affine=True, container='list',
         print("Parsing lengths of %s streamlines" % nb_streamlines)
         t0 = time()
 
-    lengths = np.empty(nb_streamlines, dtype=np.int32)
-    buffer_int32 = buffer.view(dtype=np.int32)
-    lengths = parse_lengths(buffer_int32, lengths, point_size, n_properties)
+
+    buffer_int32 = buffer.view(dtype=np.uint32)
+
+    #####
+    # Heuristic for extracting streamline lengths from a TRK file.
+    ##
+    # Leverage the fact that float32 numbers greater than ~1.4e-40
+    # when viewed as uint32 are larger than 100000.
+    # i.e., numbers < 100000 must be the 'length' values.
+    lengths = buffer_int32[buffer_int32 < 100000]
+    # Since float32(0) == int32(0), we may got false postives.
+    # However, we can assume that length of a streamline is greater than 0.
+    lengths = lengths[lengths > 0]
+    if len(lengths) > nb_streamlines:
+        # If we detected more 'length' values than there are streamlines,
+        # we can fallback on the more robust (but slower) method.
+        print("*Using fallback method*")
+        lengths = np.empty(nb_streamlines, dtype=np.int32)
+        pointer = 0
+        for idx in range(len(lengths)):
+            l = buffer_int32[pointer]
+            lengths[idx] = l
+            pointer += 1 + l * point_size + n_properties
 
     if verbose:
         print("%s sec." % (time() - t0))
@@ -110,10 +104,18 @@ def load_streamlines(trk_fn, idxs=None, apply_affine=True, container='list',
 
         t0 = time()
 
-    streamlines = parse_streamlines(buffer, idxs, split_points, n_floats, aff, apply_affine)
-    
+    # Load the streamline in an ArraySequence.
+    seq = nib.streamlines.ArraySequence()
+    seq._data = buffer
+    seq._offsets = split_points
+    seq._lengths = n_floats
+
+    # Get the streamlines as a list instead of ArraySequence (to match the expected returned output).
+    streamlines = [s.reshape(-1, 3) for s in seq[idxs]]
+
     if verbose:
         print("%s sec." % (time() - t0))
+        t0 = time()
 
     if verbose:
         print("Converting all streamlines to the container %s" % container)
@@ -153,5 +155,5 @@ if __name__ == '__main__':
                                                               apply_affine=True,
                                                               container='list',
                                                               verbose=True)
-    
+
     print("Done.")
